@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useReducer, useState } from 'react'
 import _ from 'underscore'
 import { Tabs, Tab, StyledTabList, StyledTabPanel } from 'baseui-sd/tabs-motion'
 import icon from '../assets/images/icon-large.png'
@@ -47,7 +47,8 @@ import {
     IPromotionResponse,
     fetchPromotions,
     II18nPromotionContentItem,
-    getPromotionItem,
+    choicePromotionItem,
+    IPromotionItem,
 } from '../services/promotion'
 import useSWR from 'swr'
 import { Markdown } from './Markdown'
@@ -1242,6 +1243,7 @@ function ProviderSelector({ value, onChange, hasPromotion }: IProviderSelectorPr
                   ),
                   id: 'OpenAI',
               },
+              { label: 'Gemini', id: 'Gemini' },
               // { label: 'ChatGPT (Web)', id: 'ChatGPT' },
               { label: 'Azure', id: 'Azure' },
               { label: 'MiniMax', id: 'MiniMax' },
@@ -1277,6 +1279,7 @@ function ProviderSelector({ value, onChange, hasPromotion }: IProviderSelectorPr
                   id: 'OpenAI',
               },
               { label: 'ChatGPT (Web)', id: 'ChatGPT' },
+              { label: 'Gemini', id: 'Gemini' },
               { label: 'Azure', id: 'Azure' },
               { label: 'MiniMax', id: 'MiniMax' },
               { label: 'Moonshot', id: 'Moonshot' },
@@ -1311,6 +1314,7 @@ const { Form, FormItem, useForm } = createForm<ISettings>()
 interface IInnerSettingsProps {
     showFooter?: boolean
     onSave?: (oldSettings: ISettings) => void
+    promotionID?: string
 }
 
 interface ISettingsProps extends IInnerSettingsProps {
@@ -1330,7 +1334,7 @@ export function Settings({ engine, ...props }: ISettingsProps) {
     )
 }
 
-export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProps) {
+export function InnerSettings({ onSave, showFooter = false, promotionID }: IInnerSettingsProps) {
     const { data: promotions, mutate: refetchPromotions } = useSWR<IPromotionResponse>('promotions', fetchPromotions)
 
     useEffect(() => {
@@ -1602,9 +1606,29 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
     const [disclaimerAgreeLink, setDisclaimerAgreeLink] = useState<string>()
     const [showDisclaimerModal, setShowDisclaimerModal] = useState(false)
 
-    const openaiAPIKeyPromotion = useMemo(() => {
-        return getPromotionItem(promotions?.openai_api_key)
-    }, [promotions])
+    const [openaiAPIKeyPromotion, setOpenaiAPIKeyPromotion] = useState<IPromotionItem>()
+
+    useEffect(() => {
+        let unlisten: (() => void) | undefined = undefined
+        if (promotionID) {
+            setOpenaiAPIKeyPromotion(promotions?.openai_api_key?.find((item) => item.id === promotionID))
+        } else {
+            choicePromotionItem(promotions?.openai_api_key).then(setOpenaiAPIKeyPromotion)
+            if (isTauri) {
+                const appWindow = getCurrent()
+                appWindow
+                    .listen('tauri://focus', () => {
+                        choicePromotionItem(promotions?.openai_api_key).then(setOpenaiAPIKeyPromotion)
+                    })
+                    .then((cb) => {
+                        unlisten = cb
+                    })
+            }
+        }
+        return () => {
+            unlisten?.()
+        }
+    }, [isTauri, promotionID, promotions?.openai_api_key])
 
     const { promotionShowed, setPromotionShowed } = usePromotionShowed(openaiAPIKeyPromotion)
 
@@ -1614,13 +1638,19 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
         if (isOpenAI) {
             setPromotionShowed(true)
         }
-        // const timer = setTimeout(() => {
-        //     setPromotionShowed(true)
-        // }, 15000)
-        // return () => {
-        //     clearTimeout(timer)
-        // }
     }, [setPromotionShowed, isOpenAI])
+
+    useEffect(() => {
+        if (isOpenAI && openaiAPIKeyPromotion) {
+            trackEvent('promotion_view', { id: openaiAPIKeyPromotion.id })
+        }
+    }, [isOpenAI, openaiAPIKeyPromotion])
+
+    useEffect(() => {
+        if (showDisclaimerModal && openaiAPIKeyPromotion?.id) {
+            trackEvent('promotion_disclaimer_view', { id: openaiAPIKeyPromotion.id })
+        }
+    }, [openaiAPIKeyPromotion?.id, showDisclaimerModal])
 
     console.debug('render settings')
 
@@ -1694,6 +1724,7 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
                             onClick={(e) => {
                                 e.stopPropagation()
                                 setShowBuyMeACoffee(true)
+                                trackEvent('buy_me_a_coffee_clicked')
                             }}
                         >
                             {'❤️  ' + t('Buy me a coffee')}
@@ -1820,6 +1851,40 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
                         >
                             <ProviderSelector hasPromotion={openaiAPIKeyPromotion !== undefined && !promotionShowed} />
                         </FormItem>
+                        <div
+                            style={{
+                                display: values.provider === 'Gemini' ? 'block' : 'none',
+                            }}
+                        >
+                            <FormItem
+                                name='geminiAPIModel'
+                                label={t('API Model')}
+                                required={values.provider === 'Gemini'}
+                            >
+                                <APIModelSelector provider='Gemini' currentProvider={values.provider} onBlur={onBlur} />
+                            </FormItem>
+                            <FormItem
+                                required={values.provider === 'Gemini'}
+                                name='geminiAPIKey'
+                                label='Gemini API Key'
+                                caption={
+                                    <div>
+                                        {t('Go to the')}{' '}
+                                        <a
+                                            target='_blank'
+                                            href='https://makersuite.google.com/app/apikey'
+                                            rel='noreferrer'
+                                            style={linkStyle}
+                                        >
+                                            Google AI Studio
+                                        </a>{' '}
+                                        {t('to get your API Key.')}
+                                    </div>
+                                }
+                            >
+                                <Input autoFocus type='password' size='compact' onBlur={onBlur} />
+                            </FormItem>
+                        </div>
                         <div
                             style={{
                                 display: values.provider === 'OpenAI' ? 'block' : 'none',
@@ -2155,6 +2220,15 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
                             style={{
                                 display: isDesktopApp ? 'block' : 'none',
                             }}
+                            name='autoHideWindowWhenOutOfFocus'
+                            label={t('Auto hide window when out of focus')}
+                        >
+                            <MyCheckbox onBlur={onBlur} />
+                        </FormItem>
+                        <FormItem
+                            style={{
+                                display: isDesktopApp ? 'block' : 'none',
+                            }}
                             name='automaticCheckForUpdates'
                             label={t('Automatic check for updates')}
                         >
@@ -2339,6 +2413,7 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
                         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                             e.stopPropagation()
                             e.preventDefault()
+                            trackEvent('promotion_clicked', { id: openaiAPIKeyPromotion?.id ?? '' })
                             if (isTauri) {
                                 if (disclaimerAgreeLink) {
                                     open(disclaimerAgreeLink)

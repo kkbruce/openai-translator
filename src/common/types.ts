@@ -61,6 +61,8 @@ export interface ISettings {
     azureAPIModel: string
     miniMaxGroupID: string
     miniMaxAPIKey: string
+    geminiAPIKey: string
+    geminiAPIModel: string
     moonshotAPIKey: string
     moonshotAPIModel: string
     autoTranslate: boolean
@@ -94,4 +96,5 @@ export interface ISettings {
     autoCollect?: boolean
     hideTheIconInTheDock?: boolean
     languageDetectionEngine?: LanguageDetectionEngine
+    autoHideWindowWhenOutOfFocus?: boolean
 }
